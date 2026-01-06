@@ -1,0 +1,1289 @@
+// ===========================================
+// PRISMA SCHEMA
+// Enterprise eCommerce Platform
+// ===========================================
+// Features:
+// - Soft delete on all tables (isDeleted, deletedAt, deletedBy)
+// - Audit fields (createdAt, createdBy, updatedAt, updatedBy)
+// - Separate Role table for flexible role management
+// ===========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===========================================
+// ENUMS
+// ===========================================
+
+enum SellerStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum ProductStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  INACTIVE
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum BannerStatus {
+  ACTIVE
+  INACTIVE
+  SCHEDULED
+}
+
+// ===========================================
+// ROLE & PERMISSION MODELS
+// ===========================================
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  displayName String
+  description String?
+  permissions String[] // Array of permission strings
+  isSystem    Boolean  @default(false) // System roles cannot be deleted
+  isActive    Boolean  @default(true)
+
+  // Audit fields
+  createdAt   DateTime  @default(now())
+  createdBy   String?
+  updatedAt   DateTime  @updatedAt
+  updatedBy   String?
+
+  // Soft delete
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+
+  // Relations
+  userRoles   UserRole[]
+
+  @@index([name])
+  @@index([isDeleted])
+  @@map("roles")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  isPrimary Boolean  @default(false) // Primary role for the user
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@index([isDeleted])
+  @@map("user_roles")
+}
+
+// ===========================================
+// USER MODELS
+// ===========================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  password        String
+  firstName       String
+  lastName        String
+  phone           String?
+  avatar          String?
+  isActive        Boolean   @default(true)
+  isEmailVerified Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+
+  // Audit fields
+  createdAt       DateTime  @default(now())
+  createdBy       String?
+  updatedAt       DateTime  @updatedAt
+  updatedBy       String?
+
+  // Soft delete
+  isDeleted       Boolean   @default(false)
+  deletedAt       DateTime?
+  deletedBy       String?
+
+  // Relations
+  roles           UserRole[]
+  sellerProfile   SellerProfile?
+  addresses       Address[]
+  cart            Cart?
+  wishlist        Wishlist?
+  orders          Order[]
+  reviews         Review[]
+  refreshTokens   RefreshToken[]
+
+  // Self-referential audit relations (for tracking who created/updated/deleted)
+  createdUsers    User[]    @relation("UserCreatedBy")
+  createdByUser   User?     @relation("UserCreatedBy", fields: [createdBy], references: [id])
+  updatedUsers    User[]    @relation("UserUpdatedBy")
+  updatedByUser   User?     @relation("UserUpdatedBy", fields: [updatedBy], references: [id])
+  deletedUsers    User[]    @relation("UserDeletedBy")
+  deletedByUser   User?     @relation("UserDeletedBy", fields: [deletedBy], references: [id])
+
+  @@index([email])
+  @@index([isDeleted])
+  @@index([isActive])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete (for token invalidation tracking)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([isDeleted])
+  @@map("refresh_tokens")
+}
+
+model SellerProfile {
+  id                  String       @id @default(cuid())
+  userId              String       @unique
+  businessName        String
+  businessDescription String?
+  logo                String?
+  businessEmail       String?
+  businessPhone       String?
+  businessAddress     String?
+  taxId               String?
+  status              SellerStatus @default(PENDING)
+  rating              Float        @default(0)
+  totalSales          Int          @default(0)
+  totalRevenue        Float        @default(0)
+  isVerified          Boolean      @default(false)
+  verifiedAt          DateTime?
+  verifiedBy          String?
+  rejectionReason     String?
+  rejectedAt          DateTime?
+  rejectedBy          String?
+
+  // Audit fields
+  createdAt           DateTime     @default(now())
+  createdBy           String?
+  updatedAt           DateTime     @updatedAt
+  updatedBy           String?
+
+  // Soft delete
+  isDeleted           Boolean      @default(false)
+  deletedAt           DateTime?
+  deletedBy           String?
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([status])
+  @@index([rating])
+  @@index([isDeleted])
+  @@map("seller_profiles")
+}
+
+model Address {
+  id           String  @id @default(cuid())
+  userId       String
+  label        String? // e.g., "Home", "Office"
+  firstName    String
+  lastName     String
+  company      String?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  postalCode   String
+  country      String  @default("US")
+  phone        String?
+  isDefault    Boolean @default(false)
+
+  // Audit fields
+  createdAt    DateTime  @default(now())
+  createdBy    String?
+  updatedAt    DateTime  @updatedAt
+  updatedBy    String?
+
+  // Soft delete
+  isDeleted    Boolean   @default(false)
+  deletedAt    DateTime?
+  deletedBy    String?
+
+  // Relations
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingOrders Order[] @relation("ShippingAddress")
+  billingOrders  Order[] @relation("BillingAddress")
+
+  @@index([userId])
+  @@index([isDeleted])
+  @@map("addresses")
+}
+
+// ===========================================
+// PRODUCT MODELS
+// ===========================================
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  image       String?
+  icon        String?
+  parentId    String?
+  level       Int     @default(0)
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+  isFeatured  Boolean @default(false)
+
+  // SEO fields
+  metaTitle       String?
+  metaDescription String?
+
+  // Audit fields
+  createdAt   DateTime  @default(now())
+  createdBy   String?
+  updatedAt   DateTime  @updatedAt
+  updatedBy   String?
+
+  // Soft delete
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+
+  // Relations
+  parent   Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[]        @relation("CategoryHierarchy")
+  products ProductCategory[]
+
+  @@index([slug])
+  @@index([parentId])
+  @@index([isDeleted])
+  @@index([isActive])
+  @@map("categories")
+}
+
+model Product {
+  id               String        @id @default(cuid())
+  name             String
+  slug             String        @unique
+  description      String
+  shortDescription String?
+  price            Float
+  compareAtPrice   Float?
+  costPrice        Float?
+  sku              String?       @unique
+  barcode          String?
+  quantity         Int           @default(0)
+  lowStockThreshold Int          @default(5)
+  status           ProductStatus @default(DRAFT)
+  isFeatured       Boolean       @default(false)
+  isDigital        Boolean       @default(false)
+  weight           Float?
+  weightUnit       String?       @default("kg")
+  length           Float?
+  width            Float?
+  height           Float?
+  dimensionUnit    String?       @default("cm")
+  tags             String[]
+
+  // SEO fields
+  metaTitle        String?
+  metaDescription  String?
+
+  // Stats
+  sellerId         String
+  averageRating    Float         @default(0)
+  reviewCount      Int           @default(0)
+  viewCount        Int           @default(0)
+  salesCount       Int           @default(0)
+
+  // Moderation
+  moderatedAt      DateTime?
+  moderatedBy      String?
+  rejectionReason  String?
+
+  // Audit fields
+  createdAt        DateTime      @default(now())
+  createdBy        String?
+  updatedAt        DateTime      @updatedAt
+  updatedBy        String?
+
+  // Soft delete
+  isDeleted        Boolean       @default(false)
+  deletedAt        DateTime?
+  deletedBy        String?
+
+  // Relations
+  seller        SellerProfile     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  images        ProductImage[]
+  categories    ProductCategory[]
+  variants      ProductVariant[]
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
+  orderItems    OrderItem[]
+  reviews       Review[]
+
+  @@index([slug])
+  @@index([sellerId])
+  @@index([status])
+  @@index([price])
+  @@index([averageRating])
+  @@index([isFeatured])
+  @@index([isDeleted])
+  @@index([createdAt])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  isPrimary Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([isDeleted])
+  @@map("product_images")
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  name      String  // e.g., "Red / Large"
+  sku       String? @unique
+  price     Float?
+  quantity  Int     @default(0)
+  options   Json    // e.g., { "color": "Red", "size": "Large" }
+  isActive  Boolean @default(true)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([isDeleted])
+  @@map("product_variants")
+}
+
+model ProductCategory {
+  id         String @id @default(cuid())
+  productId  String
+  categoryId String
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, categoryId])
+  @@index([isDeleted])
+  @@map("product_categories")
+}
+
+// ===========================================
+// CART MODELS
+// ===========================================
+
+model Cart {
+  id        String @id @default(cuid())
+  userId    String @unique
+  sessionId String? // For guest carts
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@index([isDeleted])
+  @@map("carts")
+}
+
+model CartItem {
+  id        String @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int    @default(1)
+  price     Float  // Price at time of adding to cart
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+  @@index([isDeleted])
+  @@map("cart_items")
+}
+
+// ===========================================
+// WISHLIST MODELS
+// ===========================================
+
+model Wishlist {
+  id     String @id @default(cuid())
+  userId String @unique
+  name   String @default("My Wishlist")
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WishlistItem[]
+
+  @@index([isDeleted])
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         String @id @default(cuid())
+  wishlistId String
+  productId  String
+  note       String? // User's note about why they want this
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  wishlist Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+  @@index([wishlistId])
+  @@index([productId])
+  @@index([isDeleted])
+  @@map("wishlist_items")
+}
+
+// ===========================================
+// ORDER MODELS
+// ===========================================
+
+model Order {
+  id                 String      @id @default(cuid())
+  orderNumber        String      @unique
+  userId             String
+  status             OrderStatus @default(PENDING)
+  subtotal           Float
+  tax                Float       @default(0)
+  taxRate            Float?      @default(0)
+  shippingCost       Float       @default(0)
+  shippingMethod     String?
+  discount           Float       @default(0)
+  discountCode       String?
+  total              Float
+  currency           String      @default("USD")
+
+  // Addresses
+  shippingAddressId  String
+  billingAddressId   String?
+
+  // Payment
+  paymentMethod      String?
+  paymentStatus      String      @default("pending")
+  paymentId          String?     // External payment provider ID
+  paidAt             DateTime?
+
+  // Shipping
+  trackingNumber     String?
+  trackingUrl        String?
+  estimatedDelivery  DateTime?
+  shippedAt          DateTime?
+  deliveredAt        DateTime?
+
+  // Cancellation
+  cancelledAt        DateTime?
+  cancelledBy        String?
+  cancellationReason String?
+
+  // Customer notes
+  customerNotes      String?
+  internalNotes      String?
+
+  // Audit fields
+  createdAt          DateTime    @default(now())
+  createdBy          String?
+  updatedAt          DateTime    @updatedAt
+  updatedBy          String?
+
+  // Soft delete
+  isDeleted          Boolean     @default(false)
+  deletedAt          DateTime?
+  deletedBy          String?
+
+  // Relations
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingAddress Address         @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddress  Address?        @relation("BillingAddress", fields: [billingAddressId], references: [id])
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+
+  @@index([userId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([isDeleted])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  productId    String
+  productName  String  // Snapshot of product name at order time
+  productSku   String? // Snapshot of SKU
+  productImage String? // Snapshot of primary image
+  quantity     Int
+  price        Float   // Price per unit at order time
+  total        Float   // quantity * price
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([isDeleted])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  note      String?
+  changedBy String?
+
+  // Audit fields
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+// ===========================================
+// REVIEW MODELS
+// ===========================================
+
+model Review {
+  id                 String  @id @default(cuid())
+  productId          String
+  userId             String
+  rating             Int
+  title              String?
+  comment            String
+  pros               String?
+  cons               String?
+  isVerifiedPurchase Boolean @default(false)
+  helpfulCount       Int     @default(0)
+  notHelpfulCount    Int     @default(0)
+  isApproved         Boolean @default(true)
+  isFeatured         Boolean @default(false)
+
+  // Moderation
+  moderatedAt        DateTime?
+  moderatedBy        String?
+  moderationNote     String?
+
+  // Audit fields
+  createdAt          DateTime  @default(now())
+  createdBy          String?
+  updatedAt          DateTime  @updatedAt
+  updatedBy          String?
+
+  // Soft delete
+  isDeleted          Boolean   @default(false)
+  deletedAt          DateTime?
+  deletedBy          String?
+
+  // Relations
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images  ReviewImage[]
+
+  @@unique([productId, userId])
+  @@index([productId])
+  @@index([userId])
+  @@index([rating])
+  @@index([isApproved])
+  @@index([isDeleted])
+  @@map("reviews")
+}
+
+model ReviewImage {
+  id        String @id @default(cuid())
+  reviewId  String
+  url       String
+  alt       String?
+  sortOrder Int    @default(0)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([isDeleted])
+  @@map("review_images")
+}
+
+// ===========================================
+// BANNER MODEL
+// ===========================================
+
+model Banner {
+  id             String       @id @default(cuid())
+  title          String
+  subtitle       String?
+  description    String?
+  imageUrl       String
+  mobileImageUrl String?
+  linkUrl        String?
+  linkText       String?
+  linkTarget     String       @default("_self") // _self, _blank
+  status         BannerStatus @default(INACTIVE)
+  position       String       @default("home_hero") // home_hero, home_secondary, category, etc.
+  sortOrder      Int          @default(0)
+  startDate      DateTime?
+  endDate        DateTime?
+
+  // Audit fields
+  createdAt      DateTime     @default(now())
+  createdBy      String?
+  updatedAt      DateTime     @updatedAt
+  updatedBy      String?
+
+  // Soft delete
+  isDeleted      Boolean      @default(false)
+  deletedAt      DateTime?
+  deletedBy      String?
+
+  @@index([status])
+  @@index([position])
+  @@index([sortOrder])
+  @@index([isDeleted])
+  @@map("banners")
+}
+
+// ===========================================
+// COUPON / DISCOUNT MODEL
+// ===========================================
+
+model Coupon {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  description     String?
+  discountType    String    // percentage, fixed_amount
+  discountValue   Float
+  minOrderAmount  Float?
+  maxDiscountAmount Float?
+  usageLimit      Int?      // Total times this coupon can be used
+  usageCount      Int       @default(0)
+  usageLimitPerUser Int?    // Times per user
+  isActive        Boolean   @default(true)
+  startDate       DateTime?
+  endDate         DateTime?
+
+  // Restrictions
+  applicableProducts String[] // Product IDs, empty means all
+  applicableCategories String[] // Category IDs, empty means all
+
+  // Audit fields
+  createdAt       DateTime  @default(now())
+  createdBy       String?
+  updatedAt       DateTime  @updatedAt
+  updatedBy       String?
+
+  // Soft delete
+  isDeleted       Boolean   @default(false)
+  deletedAt       DateTime?
+  deletedBy       String?
+
+  @@index([code])
+  @@index([isActive])
+  @@index([isDeleted])
+  @@map("coupons")
+}
+
+// ===========================================
+// NOTIFICATION MODEL
+// ===========================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // order_update, promotion, system, etc.
+  title     String
+  message   String
+  data      Json?    // Additional data
+  isRead    Boolean  @default(false)
+  readAt    DateTime?
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([isDeleted])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ===========================================
+// SETTINGS MODEL (Platform Configuration)
+// ===========================================
+
+model Setting {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  value       String
+  type        String  @default("string") // string, number, boolean, json
+  group       String  @default("general")
+  label       String?
+  description String?
+  isPublic    Boolean @default(false) // Can be exposed to frontend
+
+  // Audit fields
+  createdAt   DateTime  @default(now())
+  createdBy   String?
+  updatedAt   DateTime  @updatedAt
+  updatedBy   String?
+
+  // Soft delete
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+
+  @@index([key])
+  @@index([group])
+  @@index([isDeleted])
+  @@map("settings")
+}
+
+// ===========================================
+// CONTENT MANAGEMENT MODELS
+// ===========================================
+
+// Blog Categories
+model BlogCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  image       String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  posts BlogPost[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([isDeleted])
+  @@map("blog_categories")
+}
+
+// Blog Posts
+model BlogPost {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  excerpt         String?
+  content         String   // Rich text/markdown content
+  coverImage      String?
+  author          String
+  authorAvatar    String?
+  authorBio       String?
+  categoryId      String?
+  tags            String[]
+  readTime        Int?     @default(5) // Estimated read time in minutes
+  viewCount       Int      @default(0)
+  likeCount       Int      @default(0)
+  isPublished     Boolean  @default(false)
+  isFeatured      Boolean  @default(false)
+  publishedAt     DateTime?
+
+  // SEO fields
+  metaTitle       String?
+  metaDescription String?
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  category BlogCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([slug])
+  @@index([categoryId])
+  @@index([isPublished])
+  @@index([isFeatured])
+  @@index([publishedAt])
+  @@index([isDeleted])
+  @@map("blog_posts")
+}
+
+// Career/Job Listings
+model Career {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  department      String   // Engineering, Marketing, Sales, etc.
+  location        String
+  locationType    String   @default("remote") // remote, onsite, hybrid
+  employmentType  String   @default("full-time") // full-time, part-time, contract
+  experienceLevel String   @default("mid") // entry, mid, senior, lead
+  salaryMin       Float?
+  salaryMax       Float?
+  salaryCurrency  String?  @default("USD")
+  description     String   // Job description
+  requirements    String[] // List of requirements
+  benefits        String[] // List of benefits
+  responsibilities String[] // List of responsibilities
+  skills          String[] // Required skills
+  isActive        Boolean  @default(true)
+  isFeatured      Boolean  @default(false)
+  applicationUrl  String?  // External application URL if any
+  applicationEmail String? // Email for applications
+  closingDate     DateTime?
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([slug])
+  @@index([department])
+  @@index([location])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([isDeleted])
+  @@map("careers")
+}
+
+// Press Releases
+model PressRelease {
+  id           String   @id @default(cuid())
+  title        String
+  slug         String   @unique
+  excerpt      String?
+  content      String   // Full press release content
+  coverImage   String?
+  source       String?  // Source attribution
+  sourceUrl    String?  // Link to original source
+  category     String   @default("news") // news, partnership, award, product, company
+  tags         String[]
+  isPublished  Boolean  @default(false)
+  isFeatured   Boolean  @default(false)
+  publishedAt  DateTime?
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([slug])
+  @@index([category])
+  @@index([isPublished])
+  @@index([isFeatured])
+  @@index([publishedAt])
+  @@index([isDeleted])
+  @@map("press_releases")
+}
+
+// FAQ Categories
+model FAQCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  icon        String? // Icon name or URL
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  faqs FAQ[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([isDeleted])
+  @@map("faq_categories")
+}
+
+// FAQs
+model FAQ {
+  id         String  @id @default(cuid())
+  question   String
+  answer     String  // Rich text/markdown
+  categoryId String?
+  sortOrder  Int     @default(0)
+  viewCount  Int     @default(0)
+  helpfulYes Int     @default(0)
+  helpfulNo  Int     @default(0)
+  isActive   Boolean @default(true)
+  isFeatured Boolean @default(false)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  // Relations
+  category FAQCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([isDeleted])
+  @@map("faqs")
+}
+
+// Contact Form Submissions
+model ContactSubmission {
+  id          String   @id @default(cuid())
+  name        String
+  email       String
+  phone       String?
+  subject     String
+  category    String   @default("general") // general, support, sales, partnership
+  message     String
+  status      String   @default("new") // new, in_progress, resolved, closed
+  priority    String   @default("normal") // low, normal, high, urgent
+  assignedTo  String?
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  internalNotes String?
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([email])
+  @@index([status])
+  @@index([category])
+  @@index([priority])
+  @@index([isDeleted])
+  @@map("contact_submissions")
+}
+
+// Team Members (for About page)
+model TeamMember {
+  id          String  @id @default(cuid())
+  name        String
+  role        String
+  department  String?
+  bio         String?
+  avatar      String?
+  email       String?
+  linkedIn    String?
+  twitter     String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+  isFeatured  Boolean @default(false) // Show on homepage/about
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([department])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([isDeleted])
+  @@map("team_members")
+}
+
+// Company Stats (for About page)
+model CompanyStat {
+  id        String  @id @default(cuid())
+  label     String  // e.g., "Happy Customers"
+  value     String  // e.g., "50K+"
+  icon      String? // Icon name
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([isActive])
+  @@index([isDeleted])
+  @@map("company_stats")
+}
+
+// Testimonials
+model Testimonial {
+  id          String  @id @default(cuid())
+  author      String
+  role        String? // e.g., "CEO at Company"
+  company     String?
+  avatar      String?
+  content     String
+  rating      Int?    @default(5)
+  isActive    Boolean @default(true)
+  isFeatured  Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  // Audit fields
+  createdAt DateTime  @default(now())
+  createdBy String?
+  updatedAt DateTime  @updatedAt
+  updatedBy String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([isDeleted])
+  @@map("testimonials")
+}
+
+// ===========================================
+// AUDIT LOG MODEL
+// ===========================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String   // CREATE, UPDATE, DELETE, LOGIN, etc.
+  entityType  String   // User, Product, Order, etc.
+  entityId    String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
